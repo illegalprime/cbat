@@ -23,7 +23,9 @@ const SLOTS: u8 = 2;
 
 #[entry]
 fn main() -> ! {
-    let data = [100, 200, 300, 400, 500];
+    // include all our data in the binary
+    let wave = include_bytes!("../res/sine-a1s.wav");
+    let data = &wave[44..];
 
     // setup
     let mut peripherals = Peripherals::take().unwrap();
@@ -165,22 +167,34 @@ fn main() -> ! {
         while (*I2S::ptr()).syncbusy.read().bits() != 0 {} // all bits
     }
 
-    let mut cycle = (0..data.len()).into_iter().cycle();
+    // create an iterator that loops our sound infinitely
+    let mut cycle = (0..data.len()).step_by(2).cycle();
 
     loop {
-        unsafe {
-            while
-                (*I2S::ptr()).intflag.read().txrdy0().bit_is_clear() ||
-                (*I2S::ptr()).syncbusy.read().data0().bit_is_set()
-            {}
+        // grab the next frame (16-bit signed mono)
+        let i = cycle.next().unwrap();
+        let word = i16::from_le_bytes([data[i], data[i + 1]]);
+        let scaled = ((word as i32) << 16) as u32;
 
-            (*I2S::ptr()).intflag.write(|w| {
-                w.txur0().set_bit()
-            });
+        // send our mono output to both left and right channels
+        for _ in 0..2 {
+            unsafe {
+                // wait for it to be ready to accept more data
+                while
+                    (*I2S::ptr()).intflag.read().txrdy0().bit_is_clear() ||
+                    (*I2S::ptr()).syncbusy.read().data0().bit_is_set()
+                {}
 
-            (*I2S::ptr()).data[0].write(|w| {
-                w.bits(data[cycle.next().unwrap()] as u32)
-            });
+                // clear any existing under-run flags
+                (*I2S::ptr()).intflag.write(|w| {
+                    w.txur0().set_bit()
+                });
+
+                // write our 16-bit data into the 32-bit register
+                (*I2S::ptr()).data[0].write(|w| {
+                    w.bits(scaled)
+                });
+            }
         }
     }
 }
