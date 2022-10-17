@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+use bsp::hal::gpio::v2::Pin;
+use bsp::hal::gpio::v2::PullUpInput;
+use bsp::hal::prelude::*;
 use panic_halt as _;
 
 use bsp::hal;
@@ -29,12 +32,24 @@ fn main() -> ! {
     let mut sound = i2s::I2s::init(pins.d0, pins.d1, pins.d9);
     sound.enable();
 
+    // our button input
+    let btn: Pin<_, PullUpInput> = pins.d10.into_pull_up_input();
+
+    // debug
+    let mut red_led: bsp::RedLed = pins.d13.into();
+
     loop {
-        // get an iterator over the entire file that converts to 32-bit
-        for word in wav.stream32() {
-            // send our mono output to both left and right channels
-            sound.write(word, word);
+        // check if we pressed the button
+        if btn.is_low().unwrap() {
+            // signal that we're writing sound
+            red_led.set_high().unwrap();
+            // get an iterator over the entire file that converts to 32-bit
+            for word in wav.stream32() {
+                // send our mono output to both left and right channels
+                sound.write(word, word);
+            }
         }
+        red_led.set_low().unwrap();
     }
 }
 
