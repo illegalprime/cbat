@@ -25,15 +25,33 @@ fn main() -> ! {
     // include all our data in the binary
     let wav = wav::Wav16::new(WAV_DATA);
 
-    // setup pins
-    let pins = setup();
+    // get a handle to all the peripherals
+    let mut peripherals = Peripherals::take().unwrap();
+
+    // set up the clock controller
+    // TODO: is this the right source for our clock controller?
+    let mut clocks = GenericClockController::with_internal_32kosc(
+        peripherals.GCLK,
+        &mut peripherals.PM,
+        &mut peripherals.SYSCTRL,
+        &mut peripherals.NVMCTRL,
+    );
+
+    // get the pins state
+    let pins = bsp::Pins::new(peripherals.PORT);
 
     // set up our custom i2s implementation
-    let mut sound = i2s::I2s::init(pins.d0, pins.d1, pins.d9);
+    let mut sound = i2s::I2s::init(
+        (pins.d0, pins.d1, pins.d9),
+        &mut clocks,
+        &mut peripherals.PM,
+        peripherals.I2S,
+    );
+    // start the sound system
     sound.enable();
 
     // our button input
-    let btn: Pin<_, PullUpInput> = pins.d10.into_pull_up_input();
+    let btn: Pin<_, PullUpInput> = pins.d10.into();
 
     // debug
     let mut red_led: bsp::RedLed = pins.d13.into();
@@ -51,16 +69,4 @@ fn main() -> ! {
         }
         red_led.set_low().unwrap();
     }
-}
-
-
-fn setup() -> bsp::Pins {
-    let mut peripherals = Peripherals::take().unwrap();
-    let _clocks = GenericClockController::with_internal_32kosc(
-        peripherals.GCLK,
-        &mut peripherals.PM,
-        &mut peripherals.SYSCTRL,
-        &mut peripherals.NVMCTRL,
-    );
-    bsp::Pins::new(peripherals.PORT)
 }

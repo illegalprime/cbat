@@ -1,190 +1,145 @@
+use bsp::hal::clock::ClockGenId;
+use bsp::hal::clock::ClockSource;
+use bsp::hal::clock::GenericClockController;
+use bsp::hal::clock::I2S0Clock;
 use bsp::hal::gpio::v2::Reset;
-use itsybitsy_m0 as bsp;
 use bsp::hal::gpio::v2::AlternateG;
 use bsp::hal::gpio::v2::PA07;
 use bsp::hal::gpio::v2::PA10;
 use bsp::hal::gpio::v2::PA11;
 use bsp::hal::gpio::v2::Pin;
-use bsp::pac::GCLK;
 use bsp::pac::I2S;
 use bsp::pac::PM;
+use itsybitsy_m0 as bsp;
 
-const SLOTS: u8 = 2;
-const GCLK3: u8 = 3;
-const DIVIDE: u16 = 17; // 48_000_000 / (44_100 * 32 * 2)
+const SLOTS: u8 = 2;    // 2 channels (left & right)
+const DIVIDE: u16 = 17; // 48,000,000 Hz / 44,100 samples / 32 bits / SLOTS
 
 
 pub struct I2s {
     _d0: Pin<PA11, AlternateG>,
     _d1: Pin<PA10, AlternateG>,
     _d9: Pin<PA07, AlternateG>,
+    _i2s_clk: I2S0Clock,
+    i2s: I2S,
 }
 
 impl I2s {
     /// Configure pins and clocks for I2S.
     /// Currently only configures I2S for 32-bit Stereo at 44,100Hz
     pub fn init(
-        d0: Pin<PA11, Reset>,
-        d1: Pin<PA10, Reset>,
-        d9: Pin<PA07, Reset>,
+        pins: (Pin<PA11, Reset>, Pin<PA10, Reset>, Pin<PA07, Reset>),
+        clocks: &mut GenericClockController,
+        pm: &mut PM,
+        i2s: I2S,
     ) -> Self {
-        // clock pin
-        let d1: Pin<PA10, AlternateG> = d1.into_alternate();
+        // set pins into G state (I2S)
+        let d0: Pin<_, AlternateG> = pins.0.into(); // left/right select
+        let d1: Pin<_, AlternateG> = pins.1.into(); // bit clock
+        let d9: Pin<_, AlternateG> = pins.2.into(); // serial data
 
-        // frame sync pin
-        let d0: Pin<PA11, AlternateG> = d0.into_alternate();
+        // enable generic clock 3, pick its source and divisor
+        let gclk3 = clocks.configure_gclk_divider_and_source(
+            ClockGenId::GCLK3,
+            DIVIDE,
+            ClockSource::DFLL48M,
+            true,
+        ).unwrap();
 
-        unsafe {
-            while (*GCLK::ptr()).status.read().syncbusy().bit_is_set() {}
+        // enable the i2s0 clock and set its source to generic clock 3
+        let i2s_clk = clocks.i2s0(&gclk3).unwrap();
 
-            (*GCLK::ptr()).gendiv.write(|w| {
-                w
-                    .id().bits(GCLK3)
-                    .div().bits(DIVIDE)
-            });
-        }
+        // turn on i2s in the power manager
+        pm.apbcmask.write(|w| w.i2s_().set_bit());
 
-        unsafe {
-            while (*GCLK::ptr()).status.read().syncbusy().bit_is_set() {}
+        // disable the i2s, its clock, and its serializer
+        i2s.ctrla.write(|w| {
+            w.cken0().clear_bit();
+            w.seren0().clear_bit();
+            w.enable().clear_bit();
+            w
+        });
 
-            (*GCLK::ptr()).genctrl.write(|w| {
-                w
-                    .id().bits(GCLK3)
-                    .src().dfll48m()
-                    .idc().set_bit()
-                    .genen().set_bit()
-            });
-        }
+        // wait for sync
+        while i2s.syncbusy.read().bits() != 0 {}
 
-        unsafe {
-            while (*GCLK::ptr()).status.read().syncbusy().bit_is_set() {}
+        // configure the i2s clock
+        i2s.clkctrl[0].write(|w| {
+            w.mcksel().gclk();
+            w.scksel().mckdiv();
+            w.fssel().sckdiv();
+            w.bitdelay().i2s();
+            unsafe { w.nbslots().bits(SLOTS - 1); }
+            w.slotsize()._32();
+            w
+        });
 
-            (*GCLK::ptr()).clkctrl.write(|w| {
-                w
-                    .id().i2s_0()
-                    .gen().gclk3()
-                    .clken().set_bit()
-            });
-        }
+        // configure the i2s serializer
+        i2s.serctrl[0].write(|w| {
+            w.dma().single();
+            w.mono().stereo();
+            w.bitrev().msbit();
+            w.extend().zero();
+            w.wordadj().right();
+            w.datasize()._32();
+            w.slotadj().right();
+            w.clksel().clk0();
+            w.sermode().tx(); // we will always be using TX mode
+            w
+        });
 
-        unsafe {
-            while (*GCLK::ptr()).status.read().syncbusy().bit_is_set() {}
-        }
-
-        let d9: Pin<PA07, AlternateG> = d9.into_alternate();
-
-        unsafe {
-            (*PM::ptr()).apbcmask.write(|w| {
-                w.i2s_().set_bit()
-            });
-        }
-
-        unsafe {
-            (*I2S::ptr()).ctrla.write(|w| {
-                w.enable().clear_bit()
-            });
-
-            while (*I2S::ptr()).syncbusy.read().enable().bit_is_set() {}
-        }
-
-        unsafe {
-            (*I2S::ptr()).ctrla.write(|w| {
-                w.cken0().clear_bit()
-            });
-
-            while (*I2S::ptr()).syncbusy.read().cken0().bit_is_set() {}
-        }
-
-        unsafe {
-            (*I2S::ptr()).clkctrl[0].write(|w| {
-                w
-                    .mcksel().gclk()
-                    .scksel().mckdiv()
-                    .fssel().sckdiv()
-                    .bitdelay().i2s()
-                    .nbslots().bits(SLOTS - 1)
-                    .slotsize()._32()
-            });
-        }
-
-        unsafe {
-            (*I2S::ptr()).ctrla.write(|w| {
-                w.seren0().clear_bit()
-            });
-
-            while (*I2S::ptr()).syncbusy.read().seren0().bit_is_set() {}
-        }
-
-        unsafe {
-            (*I2S::ptr()).serctrl[0].write(|w| {
-                w
-                    .dma().single()
-                    .mono().stereo()
-                    .bitrev().msbit()
-                    .extend().zero()
-                    .wordadj().right()
-                    .datasize()._32()
-                    .slotadj().right()
-                    .clksel().clk0()
-            });
-        }
+        // wait for settings to get applied
+        while i2s.syncbusy.read().bits() != 0 {}
 
         Self {
             _d0: d0,
             _d1: d1,
             _d9: d9,
+            _i2s_clk: i2s_clk,
+            i2s,
         }
     }
 
-    /// Enable I2S Transmit only, transmit data by calling `I2s::write`
+    fn switch(&mut self, state: bool) {
+        // enable or disable everything
+        self.i2s.ctrla.write(|w| {
+            w.seren0().bit(state);
+            w.cken0().bit(state);
+            w.enable().bit(state);
+            w
+        });
+        // wait for settings to get applied
+        while self.i2s.syncbusy.read().bits() != 0 {}
+    }
+
+    /// Enable I2S transmit only, transmit data by calling `I2s::write`.
     pub fn enable(&mut self) {
-        unsafe {
-            (*I2S::ptr()).ctrla.write(|w| {
-                w.enable().clear_bit()
-            });
+        self.switch(true);
+    }
 
-            while (*I2S::ptr()).syncbusy.read().enable().bit_is_set() {}
-        }
-
-        unsafe {
-            (*I2S::ptr()).serctrl[0].write(|w| {
-                w.sermode().tx()
-            });
-        }
-
-        unsafe {
-            (*I2S::ptr()).ctrla.write(|w| {
-                w
-                    .seren0().set_bit()
-                    .cken0().set_bit()
-                    .enable().set_bit()
-            });
-
-            while (*I2S::ptr()).syncbusy.read().bits() != 0 {} // all bits
-        }
+    /// Disable I2S transmit.
+    pub fn disable(&mut self) {
+        self.switch(false);
     }
 
     /// Write left and right channels.
     /// Will block until data can be sent before sending.
     pub fn write(&mut self, left: u32, right: u32) {
+        // subsequent writes to register alternate between left and right channels
         for word in [left, right] {
-            unsafe {
-                // wait for it to be ready to accept more data
-                while
-                    (*I2S::ptr()).intflag.read().txrdy0().bit_is_clear() ||
-                    (*I2S::ptr()).syncbusy.read().data0().bit_is_set()
-                {}
+            // wait while TX is not ready or while data bit is syncing
+            while
+                self.i2s.intflag.read().txrdy0().bit_is_clear() ||
+                self.i2s.syncbusy.read().data0().bit_is_set()
+            {}
 
-                // clear any existing under-run flags
-                (*I2S::ptr()).intflag.write(|w| {
-                    w.txur0().set_bit()
-                });
+            // clear any existing under-run flags
+            self.i2s.intflag.write(|w| w.txur0().set_bit());
 
-                // write our 16-bit data into the 32-bit register
-                (*I2S::ptr()).data[0].write(|w| {
-                    w.bits(word)
-                });
-            }
+            // write our 16-bit data into the 32-bit register
+            self.i2s.data[0].write(|w| unsafe {
+                w.data().bits(word)
+            });
         }
     }
 }
