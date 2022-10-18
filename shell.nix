@@ -16,9 +16,12 @@ let
   pkgs = import nixpkgs {
     overlays = [ mozilla_rust ];
   };
+  crossPkgs = import nixpkgs {
+    crossSystem = pkgs.lib.systems.examples.arm-embedded;
+  };
   # choose our rust
   rust_channel = pkgs.buildPackages.rustChannelOf {
-    channel = "1.61.0";
+    channel = "1.64.0";
   };
   # rust platform here is needed to build cargo-hf2
   rust_platform = pkgs.makeRustPlatform {
@@ -50,7 +53,7 @@ let
     '';
   };
 in
-pkgs.stdenv.mkDerivation {
+crossPkgs.stdenv.mkDerivation {
   name = "itsybitsy-m0";
   # since we're in embedded the only dependencies should be rust & hf2
   nativeBuildInputs = [
@@ -62,6 +65,7 @@ pkgs.stdenv.mkDerivation {
     })
     pkgs.rust-analyzer # editor completion
   ];
+  depsBuildBuild = [ pkgs.buildPackages.stdenv.cc ];
   # verbose error messages
   RUST_BACKTRACE = 1;
 }
