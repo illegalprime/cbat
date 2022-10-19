@@ -100,26 +100,17 @@ impl I2s {
         }
     }
 
-    fn switch(&mut self, state: bool) {
+    /// Enable I2S transmit only, transmit data by calling `I2s::write`.
+    pub fn enable(&mut self) {
         // enable or disable everything
         self.i2s.ctrla.write(|w| {
-            w.seren0().bit(state);
-            w.cken0().bit(state);
-            w.enable().bit(state);
+            w.seren0().set_bit();
+            w.cken0().set_bit();
+            w.enable().set_bit();
             w
         });
         // wait for settings to get applied
         while self.i2s.syncbusy.read().bits() != 0 {}
-    }
-
-    /// Enable I2S transmit only, transmit data by calling `I2s::write`.
-    pub fn enable(&mut self) {
-        self.switch(true);
-    }
-
-    /// Disable I2S transmit.
-    pub fn disable(&mut self) {
-        self.switch(false);
     }
 
     /// Write left and right channels.

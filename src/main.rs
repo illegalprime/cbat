@@ -17,7 +17,7 @@ use pac::Peripherals;
 mod i2s;
 mod wav;
 
-const WAV_DATA: &'static [u8] = include_bytes!("../res/sine-a1s.wav");
+const WAV_DATA: &'static [u8] = include_bytes!("../res/cbat.wav");
 
 
 #[entry]
