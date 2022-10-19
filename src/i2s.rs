@@ -115,9 +115,9 @@ impl I2s {
 
     /// Write left and right channels.
     /// Will block until data can be sent before sending.
-    pub fn write(&mut self, left: u32, right: u32) {
+    pub fn write(&mut self, samples: &[u32]) {
         // subsequent writes to register alternate between left and right channels
-        for word in [left, right] {
+        for word in samples {
             // wait while TX is not ready or while data bit is syncing
             while
                 self.i2s.intflag.read().txrdy0().bit_is_clear() ||
@@ -129,7 +129,7 @@ impl I2s {
 
             // write our 16-bit data into the 32-bit register
             self.i2s.data[0].write(|w| unsafe {
-                w.data().bits(word)
+                w.data().bits(*word)
             });
         }
     }

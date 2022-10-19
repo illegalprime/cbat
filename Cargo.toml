@@ -7,13 +7,6 @@ edition = "2021"
 itsybitsy_m0 = "0.13.0"
 panic-halt = "0.2"
 
-# NOTE: for this library to work, I needed:
-# 1. to get a cross env in nix without glib (arm-none) so it won't compile libc
-# 2. to unset __ARM_ARCH because we're in thumb mode with less instructions
-# 3. to tell gcc to use soft floats since our chip doesn't support it
-[dependencies.rmp3]
-path = "../rmp3"
-
 [profile.release]
 lto = true
 opt-level = "s"

@@ -17,7 +17,7 @@ use pac::Peripherals;
 mod i2s;
 mod wav;
 
-const WAV_DATA: &'static [u8] = include_bytes!("../res/cbat.wav");
+const WAV_DATA: &'static [u8] = include_bytes!("../res/cbat-high-pass.wav");
 
 
 #[entry]
@@ -62,9 +62,9 @@ fn main() -> ! {
             // signal that we're writing sound
             red_led.set_high().unwrap();
             // get an iterator over the entire file that converts to 32-bit
-            for word in wav.stream32() {
+            for word in wav.stream().map(|s| (s as u16) as u32) {
                 // send our mono output to both left and right channels
-                sound.write(word, word);
+                sound.write(&[word << 16, word << 16]);
             }
         }
         red_led.set_low().unwrap();
