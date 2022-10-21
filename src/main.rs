@@ -53,6 +53,9 @@ fn main() -> ! {
     // our button input
     let btn: Pin<_, PullUpInput> = pins.d10.into();
 
+    // an extra ground to wire out button into
+    pins.d11.into_push_pull_output().set_low().unwrap();
+
     // debug
     let mut red_led: bsp::RedLed = pins.d13.into();
 
